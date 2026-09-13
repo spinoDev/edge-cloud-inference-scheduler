@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
+#include<queue>
 using namespace std;
-
 enum class Stage {
     P_PRE,
     P_PROC,
@@ -69,12 +69,16 @@ Stage nextStage(Stage current) {
 //     }
 // }
 void startTask(Request& r, bool& edgeBusy, vector<bool>& cloudBusy) {
+    if(edgeBusy){
+        cout<<"Edge Busy - request "<<r.id<<" cannot start\n";
+         return;
+    }
     if (r.stage == Stage::P_PRE) {
-        cout << "Starting P_PRE\n";
+        cout << "Starting "<<r.id<<" P_PRE\n";
         edgeBusy = true;
     }
     else if (r.stage == Stage::P_PROC) {
-        cout << "Starting P_PROC\n";
+        cout << "Starting "<<r.id<< " P_PROC\n";
         cloudBusy[r.cloud] = true;
     }
     else if (r.stage == Stage::P_POST) {
@@ -105,20 +109,35 @@ void handleTDN(Request& r, bool& edgeBusy, vector<bool>& cloudBusy) {
             break;
     }
 }
+void schedule(queue<Request*>& readyQueue,
+              bool& edgeBusy,
+              vector<bool>& cloudBusy) {
+
+    if (readyQueue.empty())
+        return;
+
+    Request* next = readyQueue.front();
+    readyQueue.pop();
+
+    startTask(*next, edgeBusy, cloudBusy);
+}
 int main() {
 
-    Request r;
-
-    r.id = 0;
-    r.inputLength = 100;
-    r.cloud = 0;
-    r.stage = Stage::P_PRE;
-    r.tokensGenerated = 0;
-    r.outputLength = 4;
-    
     bool edgeBusy = false;
     int numberOfClouds = 2;
     vector<bool> cloudBusy(numberOfClouds, false);
+    vector<Request> requests(3);
+
+    for (int i = 0; i < requests.size(); i++) {
+        requests[i].id = i;
+        requests[i].inputLength = 100;
+        requests[i].cloud = i % numberOfClouds;
+        requests[i].tokensGenerated = 0;
+        requests[i].outputLength = 4;
+        requests[i].stage = Stage::P_PRE;
+    }
+
+
 
     // while (r.stage != Stage::FINISHED) {
     // advanceStage(r, edgeBusy, cloudBusy);
@@ -126,17 +145,25 @@ int main() {
     // cout << "tokens generated: "
     //      << r.tokensGenerated << endl;
     // }
-    startTask(r, edgeBusy, cloudBusy);
+    queue<Request*> readyQueue;
+    Request& r = requests[0];
+    Request& r1 = requests[1];
+    readyQueue.push(&r);
+    readyQueue.push(&r1);
+    Request* next = readyQueue.front();
+    readyQueue.pop();
+    startTask(*next, edgeBusy, cloudBusy);
+    
 
     cout << "TDN: P_PRE finished\n";
     handleTDN(r, edgeBusy, cloudBusy);
 
-    startTask(r, edgeBusy, cloudBusy);
+    schedule(readyQueue, edgeBusy, cloudBusy);
 
     cout << "TDN: P_PROC finished\n";
     handleTDN(r, edgeBusy, cloudBusy);
 
-    startTask(r, edgeBusy, cloudBusy);
+    schedule(readyQueue, edgeBusy, cloudBusy);
 
     cout << "TDN: P_POST finished\n";
     handleTDN(r, edgeBusy, cloudBusy);
