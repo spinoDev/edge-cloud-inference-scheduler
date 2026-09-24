@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include<queue>
+#include <climits>
 using namespace std;
 enum class Stage {
     P_PRE,
@@ -18,6 +19,8 @@ struct Request {
     int cloud; // = -1 for cloud selection in future.
     int tokensGenerated;
     int outputLength;
+    int startTime;
+    int finishTime;
     Stage stage;
 };
 Stage nextStage(Stage current) {
@@ -32,76 +35,104 @@ Stage nextStage(Stage current) {
         default:            return Stage::FINISHED;
     }
 }
-// void advanceStage(Request& r) {
-//     switch (r.stage) {
-//         case Stage::P_PRE:
-//             r.stage = Stage::P_PROC;
-//             break;
 
-//         case Stage::P_PROC:
-//             r.stage = Stage::P_POST;
-//             break;
-
-//         case Stage::P_POST:
-//             r.stage = Stage::D_PRE;
-//             break;
-
-//         case Stage::D_PRE:
-//             r.stage = Stage::D_PROC;
-//             break;
-
-//         case Stage::D_PROC:
-//             r.stage = Stage::D_POST;
-//             break;
-
-//         case Stage::D_POST:
-//             r.tokensGenerated++;
-
-//             if (r.tokensGenerated >= r.outputLength) {
-//                 r.stage = Stage::FINISHED;
-//             } else {
-//                 r.stage = Stage::D_PRE;
-//             }
-//             break;
-
-//         case Stage::FINISHED:
-//             break;
-//     }
-// }
-void startTask(Request& r, bool& edgeBusy, vector<bool>& cloudBusy) {
-    if(edgeBusy){
-        cout<<"Edge Busy - request "<<r.id<<" cannot start\n";
-         return;
-    }
-    if (r.stage == Stage::P_PRE) {
-        cout << "Starting "<<r.id<<" P_PRE\n";
-        edgeBusy = true;
-    }
-    else if (r.stage == Stage::P_PROC) {
-        cout << "Starting "<<r.id<< " P_PROC\n";
-        cloudBusy[r.cloud] = true;
-    }
-    else if (r.stage == Stage::P_POST) {
-        cout << "Starting P_POST\n";
-        edgeBusy = true;
+int stageDuration(Stage stage) {
+    switch (stage) {
+        case Stage::P_PRE:  return 2;
+        case Stage::P_PROC: return 5;
+        case Stage::P_POST: return 2;
+        case Stage::D_PRE:  return 1;
+        case Stage::D_PROC: return 3;
+        case Stage::D_POST: return 1;
+        default:            return 0;
     }
 }
-void handleTDN(Request& r, bool& edgeBusy, vector<bool>& cloudBusy) {
+int nextEventTime(
+    Request* edgeRunning,
+    vector<Request*>& cloudRunning
+) {
+    int nextTime = INT_MAX;
 
+    if (edgeRunning != nullptr)
+        nextTime = min(nextTime, edgeRunning->finishTime);
+
+    for (Request* r : cloudRunning) {
+        if (r != nullptr)
+            nextTime = min(nextTime, r->finishTime);
+    }
+
+    return nextTime;
+}
+void startTask(
+    Request& r,
+    Request*& edgeRunning,
+    vector<Request*>& cloudRunning,
+    int currentTime
+) {
+    if (r.stage == Stage::P_PRE) {
+
+        if (edgeRunning != nullptr) {
+            cout << "Edge busy - request "
+                 << r.id << " cannot start\n";
+            return;
+        }
+
+        edgeRunning = &r;
+    }
+
+    else if (r.stage == Stage::P_PROC) {
+
+        if (cloudRunning[r.cloud] != nullptr) {
+            cout << "Cloud " << r.cloud
+                 << " busy - request "
+                 << r.id << " cannot start\n";
+            return;
+        }
+
+        cloudRunning[r.cloud] = &r;
+    }
+
+    else if (r.stage == Stage::P_POST) {
+
+        if (edgeRunning != nullptr) {
+            cout << "Edge busy - request "
+                 << r.id << " cannot start\n";
+            return;
+        }
+
+        edgeRunning = &r;
+    }
+
+    // Task successfully started
+    cout << "Starting " << r.id << " stage "
+         << static_cast<int>(r.stage) << "\n";
+
+    r.startTime = currentTime;
+    r.finishTime = currentTime + stageDuration(r.stage);
+
+    cout << "  start = " << r.startTime
+         << ", finish = " << r.finishTime << "\n";
+}
+void handleTDN(
+    Request& r,
+    Request*& edgeRunning,
+    vector<Request*>& cloudRunning,
+    int currentTime
+) {
     switch (r.stage) {
 
         case Stage::P_PRE:
-            edgeBusy = false;
+            edgeRunning = nullptr;
             r.stage = Stage::P_PROC;
             break;
 
         case Stage::P_PROC:
-            cloudBusy[r.cloud] = false;
+            cloudRunning[r.cloud] = nullptr;
             r.stage = Stage::P_POST;
             break;
 
         case Stage::P_POST:
-            edgeBusy = false;
+            edgeRunning = nullptr;
             r.stage = Stage::D_PRE;
             break;
 
@@ -109,24 +140,27 @@ void handleTDN(Request& r, bool& edgeBusy, vector<bool>& cloudBusy) {
             break;
     }
 }
-void schedule(queue<Request*>& readyQueue,
-              bool& edgeBusy,
-              vector<bool>& cloudBusy) {
 
+void schedule(
+    queue<Request*>& readyQueue,
+    Request*& edgeRunning,
+    vector<Request*>& cloudRunning,int currentTime
+) {
     if (readyQueue.empty())
         return;
 
     Request* next = readyQueue.front();
     readyQueue.pop();
 
-    startTask(*next, edgeBusy, cloudBusy);
+    startTask(*next, edgeRunning, cloudRunning,currentTime);
 }
 int main() {
 
-    bool edgeBusy = false;
     int numberOfClouds = 2;
-    vector<bool> cloudBusy(numberOfClouds, false);
+    Request* edgeRunning = nullptr;
+    vector<Request*> cloudRunning(numberOfClouds, nullptr);
     vector<Request> requests(3);
+    int currentTime = 0;
 
     for (int i = 0; i < requests.size(); i++) {
         requests[i].id = i;
@@ -152,21 +186,29 @@ int main() {
     readyQueue.push(&r1);
     Request* next = readyQueue.front();
     readyQueue.pop();
-    startTask(*next, edgeBusy, cloudBusy);
+    startTask(*next, edgeRunning, cloudRunning, currentTime);
+
+    // Find when the next running task finishes
+    int nextTime = nextEventTime(edgeRunning, cloudRunning);
+
+    // Jump simulated time forward
+    currentTime = nextTime;
+
+    cout << "Current time: " << currentTime << "\n";
     
 
     cout << "TDN: P_PRE finished\n";
-    handleTDN(r, edgeBusy, cloudBusy);
+    handleTDN(r, edgeRunning, cloudRunning, currentTime);
 
-    schedule(readyQueue, edgeBusy, cloudBusy);
+    schedule(readyQueue, edgeRunning, cloudRunning,currentTime);
 
     cout << "TDN: P_PROC finished\n";
-    handleTDN(r, edgeBusy, cloudBusy);
+    handleTDN(r, edgeRunning, cloudRunning, currentTime);
 
-    schedule(readyQueue, edgeBusy, cloudBusy);
+    schedule(readyQueue, edgeRunning, cloudRunning,currentTime);
 
     cout << "TDN: P_POST finished\n";
-    handleTDN(r, edgeBusy, cloudBusy);
+    handleTDN(r, edgeRunning, cloudRunning, currentTime);
 
     cout << "Current stage: "
      << static_cast<int>(r.stage) << '\n';
